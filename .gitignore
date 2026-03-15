@@ -84,3 +84,4 @@ test_images/
 dist-info/
 .serverless/
 .vercel/
+.vercel
