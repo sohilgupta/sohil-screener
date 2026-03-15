@@ -2,7 +2,16 @@
 const nextConfig = {
   reactStrictMode: true,
   images: {
-    domains: ['www.screener.in'],
+    // Using remotePatterns (not deprecated `domains`) to mitigate
+    // Next.js Image Optimizer DoS CVE (fixed pattern: exact host, no wildcards)
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'www.screener.in',
+        port: '',
+        pathname: '/**',
+      },
+    ],
   },
   async headers() {
     return [
