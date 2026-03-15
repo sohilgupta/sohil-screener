@@ -1,0 +1,164 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Base Reset ───────────────────────────────────────────── */
+@layer base {
+  * {
+    box-sizing: border-box;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-apple-bg text-apple-text font-sans;
+    font-size: 17px;
+    line-height: 1.47;
+  }
+
+  .dark body {
+    @apply bg-apple-dark text-apple-dark-text;
+  }
+
+  ::selection {
+    @apply bg-apple-blue/20;
+  }
+}
+
+/* ─── Component Utilities ───────────────────────────────────── */
+@layer components {
+  /* Apple-style card */
+  .apple-card {
+    @apply bg-white rounded-apple-lg shadow-apple border border-apple-separator/30;
+  }
+
+  .dark .apple-card {
+    @apply bg-apple-dark-card border-apple-dark-separator/40 shadow-apple-dark;
+  }
+
+  /* Apple button */
+  .btn-primary {
+    @apply inline-flex items-center justify-center px-6 py-3 rounded-full
+           bg-apple-blue text-white font-semibold text-callout
+           transition-all duration-200 ease-out
+           hover:bg-apple-blue-hover hover:shadow-apple-md hover:-translate-y-px
+           active:scale-95 focus:outline-none focus:ring-2 focus:ring-apple-blue/40;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center px-6 py-3 rounded-full
+           bg-apple-secondary-bg text-apple-text font-semibold text-callout
+           transition-all duration-200 ease-out
+           hover:bg-apple-separator/40 hover:shadow-apple hover:-translate-y-px
+           active:scale-95 focus:outline-none;
+  }
+
+  .dark .btn-secondary {
+    @apply bg-apple-dark-elevated text-apple-dark-text hover:bg-apple-dark-separator;
+  }
+
+  /* Input field */
+  .apple-input {
+    @apply w-full px-4 py-3 rounded-apple bg-apple-secondary-bg
+           border border-transparent text-apple-text text-callout
+           placeholder-apple-secondary-text
+           focus:outline-none focus:border-apple-blue focus:bg-white
+           transition-all duration-200;
+  }
+
+  .dark .apple-input {
+    @apply bg-apple-dark-elevated text-apple-dark-text placeholder-apple-dark-secondary
+           focus:border-apple-blue focus:bg-apple-dark-card;
+  }
+
+  /* Shimmer skeleton */
+  .skeleton {
+    @apply rounded-apple overflow-hidden relative bg-apple-secondary-bg;
+  }
+
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.6) 50%,
+      transparent 100%
+    );
+    background-size: 1000px 100%;
+    animation: shimmer 1.5s infinite;
+  }
+
+  .dark .skeleton {
+    @apply bg-apple-dark-elevated;
+  }
+
+  .dark .skeleton::after {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.05) 50%,
+      transparent 100%
+    );
+    background-size: 1000px 100%;
+    animation: shimmer 1.5s infinite;
+  }
+
+  /* Section divider */
+  .section-divider {
+    @apply h-px bg-apple-separator/50 my-8;
+  }
+
+  .dark .section-divider {
+    @apply bg-apple-dark-separator/50;
+  }
+
+  /* Pill badge */
+  .pill {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-footnote font-semibold;
+  }
+
+  .pill-green {
+    @apply pill bg-apple-green/10 text-apple-green;
+  }
+
+  .pill-red {
+    @apply pill bg-apple-red/10 text-apple-red;
+  }
+
+  .pill-blue {
+    @apply pill bg-apple-blue/10 text-apple-blue;
+  }
+
+  .pill-orange {
+    @apply pill bg-apple-orange/10 text-apple-orange;
+  }
+}
+
+/* ─── Custom Scrollbar ─────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-apple-separator rounded-full;
+}
+.dark ::-webkit-scrollbar-thumb {
+  @apply bg-apple-dark-separator;
+}
+
+/* ─── Recharts overrides ────────────────────────────────────── */
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  border-radius: 12px !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1) !important;
+  border: none !important;
+  font-family: inherit !important;
+}
