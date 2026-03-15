@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: sohil-screener-api
+    runtime: python
+    region: singapore   # closest to Indian users; change to oregon/ohio as needed
+    plan: free           # upgrade to starter ($7/mo) to avoid cold starts
+    rootDir: backend
+    buildCommand: |
+      apt-get update -qq && apt-get install -y -qq tesseract-ocr && \
+      pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false          # set manually in Render dashboard — never committed
+      - key: ALLOWED_ORIGINS
+        value: https://sohil-screener.vercel.app
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PYTHONDONTWRITEBYTECODE
+        value: "1"
+    autoDeploy: true
