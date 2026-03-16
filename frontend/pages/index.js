@@ -521,7 +521,7 @@ export default function HomePage() {
       const { data } = await axios.post(`${API}/analyze-stock`, formData);
       setSingleResult(data.data);
     } catch (e) {
-      setError(e.response?.data?.detail || 'Analysis failed. Please check the ticker and try again.');
+      setError(e.response?.data?.detail || e.message || 'Analysis failed. Please check the ticker and try again.');
     } finally {
       setLoading(false);
     }
@@ -539,7 +539,7 @@ export default function HomePage() {
       });
       setMultipleResult(data.data);
     } catch (e) {
-      setError(e.response?.data?.detail || 'Analysis failed. Please check the tickers and try again.');
+      setError(e.response?.data?.detail || e.message || 'Analysis failed. Please check the tickers and try again.');
     } finally {
       setLoading(false);
     }
@@ -558,7 +558,7 @@ export default function HomePage() {
       });
       setPortfolioResult(data);
     } catch (e) {
-      setError(e.response?.data?.detail || 'Portfolio processing failed. Please try again.');
+      setError(e.response?.data?.detail || e.message || 'Portfolio processing failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -687,6 +687,11 @@ function MultipleStocksInput({ onSubmit, loading }) {
 
 // ─── Error Banner ─────────────────────────────────────────────────────────────
 function ErrorBanner({ message }) {
+  const isNetworkError = message.startsWith('Network Error') || message.includes('ERR_') || message.includes('ECONNREFUSED');
+  const displayMessage = isNetworkError
+    ? 'Could not reach the analysis server. The backend may be starting up (cold start ~30s on free plan) — please wait and try again.'
+    : message;
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -697,7 +702,7 @@ function ErrorBanner({ message }) {
         <svg className="w-5 h-5 text-apple-red flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
           <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
         </svg>
-        <p className="text-subhead text-apple-red">{message}</p>
+        <p className="text-subhead text-apple-red">{displayMessage}</p>
       </div>
     </motion.div>
   );
