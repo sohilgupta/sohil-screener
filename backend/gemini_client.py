@@ -10,9 +10,10 @@ logger = logging.getLogger(__name__)
 
 # Models to try in order of preference
 GEMINI_MODELS = [
-    "gemini-1.5-pro",
-    "gemini-1.5-flash",
-    "gemini-pro",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-pro-latest",
+    "gemini-1.5-flash-latest",
 ]
 
 
