@@ -1,72 +1,156 @@
-"""Data Agent — fetches and caches financial data from screener.in / trendlyne."""
+"""Data Agent — resolves ticker/company name then fetches financial data.
+
+Resolution order:
+  1. ticker_resolver (Gemini LLM + known-ticker table) → canonical yf_symbol
+  2. yfinance_fetcher  (Yahoo Finance, covers Indian NSE + US stocks)
+  3. screener_scraper  (fallback for Indian stocks only)
+"""
 from __future__ import annotations
 
 import asyncio
-import sys
+import logging
 import os
+import sys
 from typing import Any, Dict, Optional
 
-# Allow importing sibling modules from the backend root
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from .base_agent import BaseAgent
 
+logger = logging.getLogger(__name__)
+
 
 class DataAgent(BaseAgent):
     """
-    Fetches structured financial data for an NSE/BSE ticker.
+    Fetches structured financial data for any publicly traded stock.
 
     Inputs:
-        ticker          (str)   – NSE/BSE ticker symbol
-        use_cache       (bool)  – honour Redis cache (default True)
+        ticker          str   – ticker symbol OR company name (any case, spaces OK)
+        market_condition str  – override auto-detected market trend
+        risk_free_rate  float – override default risk-free rate
+        use_cache       bool  – honour Redis cache (default True)
 
-    Outputs (dict):
-        ticker, company_name, current_price, revenue, ebitda, net_income,
-        fcf, de_ratio, shares_outstanding, market_cap, pe_ratio, book_value,
-        roe, opm, industry, competitors, top_ratios, source
+    Outputs:
+        ticker, yf_symbol, company_name, current_price, revenue, ebitda,
+        net_income, fcf, de_ratio, shares_outstanding, market_cap, pe_ratio,
+        book_value, roe, opm, industry, competitors, source, market, currency,
+        unit_label, unit_multiplier, market_condition, risk_free_rate
     """
 
     AGENT_ID = "data_agent"
 
     def __init__(self, cache=None) -> None:
         super().__init__()
-        self._cache = cache  # optional CacheClient
+        self._cache = cache
 
     async def _execute(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        ticker: str = inputs["ticker"].strip().upper()
+        raw_input: str = inputs["ticker"].strip()
         use_cache: bool = inputs.get("use_cache", True)
 
-        # 1. Try cache
-        cache_key = f"stock_data:{ticker}"
+        # ── Step 1: Resolve to canonical yfinance symbol ───────────────────────
+        loop = asyncio.get_event_loop()
+
+        from ticker_resolver import resolve_ticker
+        meta = await loop.run_in_executor(None, resolve_ticker, raw_input)
+        yf_symbol: str = meta["yf_symbol"]
+        display_ticker: str = meta["display_ticker"]
+
+        # ── Step 2: Cache lookup ────────────────────────────────────────────────
+        cache_key = f"stock_data:{yf_symbol}"
         if use_cache and self._cache:
             cached = await self._cache.get(cache_key)
             if cached:
-                self.logger.info(f"Cache hit for {ticker}")
+                logger.info("Cache hit for %s", yf_symbol)
                 cached["_cached"] = True
-                return cached
+                return self._inject_market_context(cached, inputs)
 
-        # 2. Fetch live — run blocking scrapers in executor
-        loop = asyncio.get_event_loop()
-
-        from screener_scraper import fetch_screener_data, get_nifty_trend, get_risk_free_rate
-
-        stock_data: Dict[str, Any] = await loop.run_in_executor(
-            None, fetch_screener_data, ticker
+        # ── Step 3: Fetch from Yahoo Finance (primary) ─────────────────────────
+        from yfinance_fetcher import fetch_yf_data
+        stock_data: Optional[Dict[str, Any]] = await loop.run_in_executor(
+            None, fetch_yf_data, yf_symbol, meta
         )
 
-        # Inject market context
-        market_condition: Optional[str] = inputs.get("market_condition")
-        if not market_condition:
-            market_condition = await loop.run_in_executor(None, get_nifty_trend)
+        # ── Step 4: Fallback to screener.in for Indian stocks ──────────────────
+        if not self._has_price(stock_data) and meta.get("market") == "IN":
+            logger.warning(
+                "yfinance returned no price for %s — trying screener.in", yf_symbol
+            )
+            from screener_scraper import fetch_screener_data
+            screener_data = await loop.run_in_executor(
+                None, fetch_screener_data, display_ticker
+            )
+            if self._has_price(screener_data):
+                # Screener data lacks unit_multiplier; inject defaults
+                screener_data.setdefault("unit_multiplier", 1e7)
+                screener_data.setdefault("unit_label", "Crore")
+                screener_data.setdefault("market", "IN")
+                screener_data.setdefault("currency", "INR")
+                stock_data = screener_data
+            elif stock_data is None:
+                stock_data = screener_data  # at least has company name
 
-        risk_free_rate: float = inputs.get("risk_free_rate") or get_risk_free_rate()
+        # ── Step 5: Last-resort empty dict ─────────────────────────────────────
+        if stock_data is None:
+            stock_data = self._empty(display_ticker, meta)
 
-        stock_data["market_condition"] = market_condition
-        stock_data["risk_free_rate"] = risk_free_rate
         stock_data["_cached"] = False
 
-        # 3. Store in cache (1-hour TTL)
-        if use_cache and self._cache:
+        # ── Step 6: Inject market context ──────────────────────────────────────
+        stock_data = self._inject_market_context(stock_data, inputs)
+
+        # ── Step 7: Cache result (1-hour TTL) ──────────────────────────────────
+        if use_cache and self._cache and self._has_price(stock_data):
             await self._cache.set(cache_key, stock_data, ttl=3600)
 
         return stock_data
+
+    # ── Helpers ────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _has_price(data: Optional[Dict]) -> bool:
+        return bool(data and data.get("current_price"))
+
+    def _inject_market_context(
+        self, stock_data: Dict[str, Any], inputs: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Add market_condition and risk_free_rate, auto-detecting if not supplied."""
+        import asyncio
+        loop = asyncio.get_event_loop()
+
+        # Market condition
+        mc = inputs.get("market_condition") or stock_data.get("market_condition")
+        if not mc:
+            try:
+                from screener_scraper import get_nifty_trend
+                mc = get_nifty_trend()
+            except Exception:
+                mc = "Neutral"
+        stock_data["market_condition"] = mc
+
+        # Risk-free rate
+        rfr = inputs.get("risk_free_rate") or stock_data.get("risk_free_rate")
+        if not rfr:
+            rfr = 4.5 if stock_data.get("market") == "US" else 7.2
+        stock_data["risk_free_rate"] = rfr
+
+        return stock_data
+
+    @staticmethod
+    def _empty(ticker: str, meta: Dict) -> Dict[str, Any]:
+        return {
+            "ticker": ticker,
+            "yf_symbol": meta.get("yf_symbol", ticker),
+            "company_name": meta.get("company_name", ticker),
+            "current_price": None,
+            "revenue": None, "ebitda": None, "net_income": None, "fcf": None,
+            "de_ratio": None, "shares_outstanding": None, "market_cap": None,
+            "pe_ratio": None, "book_value": None, "roe": None, "opm": None,
+            "industry": "Indian Equity" if meta.get("market") == "IN" else "US Equity",
+            "competitors": [], "top_ratios": {},
+            "source": "unavailable",
+            "market": meta.get("market", "IN"),
+            "currency": meta.get("currency", "INR"),
+            "unit_label": "Crore" if meta.get("market") == "IN" else "Million",
+            "unit_multiplier": 1e7 if meta.get("market") == "IN" else 1e6,
+            "exchange": meta.get("exchange", ""),
+        }

@@ -55,6 +55,9 @@ class DCFAgent(BaseAgent):
         market_condition: str = inputs.get("market_condition", "Neutral")
         shares_outstanding: Optional[float] = inputs.get("shares_outstanding")
         current_price: Optional[float] = inputs.get("current_price")
+        # unit_multiplier: converts stored financial unit → per-share currency
+        # Indian (Crore → INR): 1e7  |  US (Million → USD): 1e6
+        unit_multiplier: float = float(inputs.get("unit_multiplier", 1e7))
 
         # --- Learned parameter overrides from LearningAgent ---
         learned: Dict[str, float] = inputs.get("param_overrides", {})
@@ -112,6 +115,7 @@ class DCFAgent(BaseAgent):
                 terminal_growth=terminal_growth,
                 years=5,
                 shares_outstanding=shares_outstanding,
+                unit_multiplier=unit_multiplier,
             )
             result["probability"] = round(probability, 2)
             result["fcf_growth_pct"] = round(adjusted_growth * 100, 1)
@@ -192,6 +196,7 @@ class DCFAgent(BaseAgent):
         terminal_growth: float,
         years: int,
         shares_outstanding: Optional[float],
+        unit_multiplier: float = 1e7,
     ) -> Dict[str, Any]:
         """Compute DCF: PV of projected FCFs + terminal value → equity value → per share."""
         fcf = base_fcf_cr
@@ -212,8 +217,9 @@ class DCFAgent(BaseAgent):
 
         intrinsic_per_share = None
         if shares_outstanding and shares_outstanding > 0:
-            # EV in ₹ = EV_cr * 1e7; divide by shares → per share price in ₹
-            intrinsic_per_share = round((enterprise_value_cr * 1e7) / shares_outstanding, 2)
+            # EV in currency units = EV_stored * unit_multiplier
+            # Indian: unit_multiplier=1e7 (Crores→INR), US: unit_multiplier=1e6 (Millions→USD)
+            intrinsic_per_share = round((enterprise_value_cr * unit_multiplier) / shares_outstanding, 2)
 
         return {
             "enterprise_value_cr": round(enterprise_value_cr, 2),

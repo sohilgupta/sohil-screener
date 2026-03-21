@@ -729,7 +729,7 @@ export default function HomePage() {
         {/* Footer */}
         <footer className="border-t border-apple-separator/30 dark:border-apple-dark-separator/30 py-8 px-6 text-center">
           <p className="text-footnote text-apple-secondary-text dark:text-apple-dark-secondary">
-            Multi-agent system: Data · DCF · LLM · Portfolio · Memory · Evaluation · Learning agents · Data from screener.in · Not financial advice
+            Multi-agent system: Data · DCF · LLM · Portfolio · Memory · Evaluation · Learning agents · Data from Yahoo Finance · Not financial advice
           </p>
         </footer>
       </div>
@@ -745,7 +745,7 @@ function MultipleStocksInput({ onSubmit, loading }) {
     <GlassCard className="p-6">
       <SectionTitle
         title="Multiple Stock Analysis"
-        subtitle="Enter up to 12 NSE tickers, comma-separated"
+        subtitle="Up to 12 stocks — ticker symbols or company names, comma-separated"
       />
       <div className="mt-5 space-y-4">
         <div>
@@ -755,7 +755,7 @@ function MultipleStocksInput({ onSubmit, loading }) {
           <textarea
             value={tickers}
             onChange={(e) => setTickers(e.target.value)}
-            placeholder="HDFCBANK, RELIANCE, TCS, INFY, ICICIBANK"
+            placeholder="HDFCBANK, Apple, TCS, NVIDIA, Reliance"
             rows={3}
             className="apple-input resize-none"
           />

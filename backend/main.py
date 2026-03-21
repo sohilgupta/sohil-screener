@@ -120,7 +120,7 @@ async def health():
 
 @app.post("/analyze-stock")
 async def analyze_stock(req: StockAnalysisRequest):
-    ticker = req.ticker.strip().upper().replace(" ", "")
+    ticker = req.ticker.strip()
     if not ticker:
         raise HTTPException(status_code=400, detail="Ticker is required")
     try:
@@ -140,7 +140,7 @@ async def analyze_stock(req: StockAnalysisRequest):
 @app.post("/analyze-multiple")
 @app.post("/analyze-multiple-stocks")
 async def analyze_multiple_stocks(req: MultipleStocksRequest):
-    tickers = [t.strip().upper().replace(" ", "") for t in req.tickers if t.strip()]
+    tickers = [t.strip() for t in req.tickers if t.strip()]
     if not tickers:
         raise HTTPException(status_code=400, detail="At least one ticker is required")
     tickers = tickers[:12]

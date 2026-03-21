@@ -25,7 +25,7 @@ export default function InputForm({ onSubmit, loading = false }) {
     e.preventDefault();
     if (!ticker.trim()) return;
     onSubmit({
-      ticker: ticker.trim().toUpperCase(),
+      ticker: ticker.trim(),
       allocation: allocation ? parseFloat(allocation) : undefined,
       horizon: horizon ? parseInt(horizon) : undefined,
       market_condition: marketCondition || undefined,
@@ -37,22 +37,22 @@ export default function InputForm({ onSubmit, loading = false }) {
     <GlassCard className="p-6">
       <SectionTitle
         title="Stock Analysis"
-        subtitle="Enter an NSE/BSE ticker to run AI-powered valuation"
+        subtitle="Enter a ticker symbol or company name — Indian &amp; US stocks supported"
       />
 
       <form onSubmit={handleSubmit} className="mt-5 space-y-4">
         {/* Ticker input */}
         <div>
           <label className="text-subhead font-medium text-apple-text dark:text-apple-dark-text block mb-1.5">
-            NSE / BSE Symbol <span className="text-apple-red">*</span>
+            Stock <span className="text-apple-red">*</span>
           </label>
           <div className="relative">
             <input
               type="text"
               value={ticker}
-              onChange={(e) => setTicker(e.target.value.toUpperCase().replace(/\s+/g, ''))}
-              placeholder="e.g. HDFCBANK · TCS · OLAELEC · ZOMATO"
-              className="apple-input pr-10 font-mono uppercase tracking-wider"
+              onChange={(e) => setTicker(e.target.value)}
+              placeholder="TCS · Apple · HDFCBANK · NVIDIA · Reliance"
+              className="apple-input pr-10"
               required
               disabled={loading}
             />
@@ -69,8 +69,8 @@ export default function InputForm({ onSubmit, loading = false }) {
             )}
           </div>
           <p className="mt-1.5 ml-1 text-caption text-apple-secondary-text dark:text-apple-dark-secondary">
-            Use the <span className="font-semibold">NSE/BSE symbol</span>, not the company name.
-            {' '}Examples: <span className="font-mono">HDFCBANK</span>, <span className="font-mono">OLAELEC</span>, <span className="font-mono">RELIANCE</span>
+            Type a <span className="font-semibold">ticker symbol</span> or <span className="font-semibold">company name</span> — AI resolves it automatically.
+            {' '}Indian: <span className="font-mono">TCS</span>, <span className="font-mono">HDFCBANK</span> · US: <span className="font-mono">Apple</span>, <span className="font-mono">NVDA</span>
           </p>
         </div>
 
@@ -161,7 +161,7 @@ export default function InputForm({ onSubmit, loading = false }) {
             {/* Risk-free rate */}
             <div>
               <label className="text-footnote font-medium text-apple-secondary-text dark:text-apple-dark-secondary block mb-1.5">
-                Risk-Free Rate (%) <span className="font-normal">(default: Indian 10Y bond ~7.2%)</span>
+                Risk-Free Rate (%) <span className="font-normal">(default: 7.2% India · 4.5% US)</span>
               </label>
               <input
                 type="number"
