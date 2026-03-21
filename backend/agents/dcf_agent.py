@@ -56,6 +56,15 @@ class DCFAgent(BaseAgent):
         shares_outstanding: Optional[float] = inputs.get("shares_outstanding")
         current_price: Optional[float] = inputs.get("current_price")
 
+        # --- Learned parameter overrides from LearningAgent ---
+        learned: Dict[str, float] = inputs.get("param_overrides", {})
+        bull_growth_adj = learned.get("bull_growth_adj", 0.0) / 100   # % → decimal
+        base_growth_adj = learned.get("base_growth_adj", 0.0) / 100
+        bear_growth_adj = learned.get("bear_growth_adj", 0.0) / 100
+        bull_prob_adj   = learned.get("bull_prob_adj", 0.0)
+        bear_prob_adj   = learned.get("bear_prob_adj", 0.0)
+        growth_adj_applied = learned.get("base_growth_adj", 0.0)
+
         # --- Determine base FCF (Crore) ---
         base_fcf = self._resolve_base_fcf(inputs)
         if base_fcf is None or base_fcf <= 0:
@@ -63,6 +72,7 @@ class DCFAgent(BaseAgent):
                 "available": False,
                 "reason": "Insufficient FCF / earnings data for DCF",
                 "base_fcf_cr": base_fcf,
+                "param_overrides_applied": bool(learned),
             }
 
         # --- WACC ---
@@ -77,12 +87,18 @@ class DCFAgent(BaseAgent):
         pwv_numerator = 0.0
         total_prob = 0.0
 
+        growth_adjs = {"bull": bull_growth_adj, "base": base_growth_adj, "bear": bear_growth_adj}
+        prob_adjs   = {"bull": bull_prob_adj,   "base": 0.0,            "bear": bear_prob_adj}
+
         for name, params in self.SCENARIO_PARAMS.items():
-            adjusted_growth = params["fcf_growth"] + adj["fcf_growth_delta"]
+            adjusted_growth = params["fcf_growth"] + adj["fcf_growth_delta"] + growth_adjs[name]
             prob_shift = adj["probability_shift"] if name == "bull" else (
                 -adj["probability_shift"] if name == "bear" else 0
             )
-            probability = min(max(params["probability"] + prob_shift * 0.5, 0.10), 0.70)
+            probability = min(max(
+                params["probability"] + prob_shift * 0.5 + prob_adjs[name],
+                0.10
+            ), 0.70)
 
             terminal_growth = min(params["terminal_growth"], MAX_TERMINAL_GROWTH)
             # Guard: terminal growth must be < WACC
@@ -132,6 +148,8 @@ class DCFAgent(BaseAgent):
             "probability_weighted_intrinsic": pwv,
             "margin_of_safety_pct": margin_of_safety,
             "dcf_recommendation": dcf_rec,
+            "param_overrides_applied": bool(learned),
+            "growth_adj_applied": growth_adj_applied,
         }
 
     # ------------------------------------------------------------------

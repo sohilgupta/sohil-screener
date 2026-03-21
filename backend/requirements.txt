@@ -13,3 +13,5 @@ requests==2.31.0
 numpy==1.26.2
 aiohttp==3.9.1
 redis[asyncio]==5.0.1
+asyncpg==0.29.0
+APScheduler==3.10.4

@@ -13,6 +13,7 @@ import InputForm from '../components/InputForm';
 import PortfolioUpload from '../components/PortfolioUpload';
 import LoadingSkeleton from '../components/LoadingSkeleton';
 import DCFPanel from '../components/DCFPanel';
+import LearningPanel from '../components/LearningPanel';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -145,6 +146,7 @@ const TABS = [
   { id: 'single', label: 'Single Stock' },
   { id: 'multiple', label: 'Multiple Stocks' },
   { id: 'portfolio', label: 'Portfolio Upload' },
+  { id: 'learning', label: 'Learning' },
 ];
 
 function TabBar({ active, onChange }) {
@@ -712,6 +714,14 @@ export default function HomePage() {
                   )}
                 </motion.div>
               )}
+
+              {activeTab === 'learning' && (
+                <motion.div key="learning" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                  <div className="max-w-5xl mx-auto">
+                    <LearningPanel />
+                  </div>
+                </motion.div>
+              )}
             </AnimatePresence>
           </section>
         </main>
@@ -719,7 +729,7 @@ export default function HomePage() {
         {/* Footer */}
         <footer className="border-t border-apple-separator/30 dark:border-apple-dark-separator/30 py-8 px-6 text-center">
           <p className="text-footnote text-apple-secondary-text dark:text-apple-dark-secondary">
-            Multi-agent system: Data · DCF · LLM · Portfolio agents · Data from screener.in · Not financial advice
+            Multi-agent system: Data · DCF · LLM · Portfolio · Memory · Evaluation · Learning agents · Data from screener.in · Not financial advice
           </p>
         </footer>
       </div>

@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from .data_agent import DataAgent
 from .dcf_agent import DCFAgent
 from .llm_agent import LLMAgent
+from .memory_agent import MemoryAgent
 from .ocr_agent import OCRAgent
 from .portfolio_agent import PortfolioAgent
 
@@ -28,6 +29,7 @@ class Orchestrator:
         self._data = DataAgent(cache=cache)
         self._dcf = DCFAgent()
         self._llm = LLMAgent(cache=cache)
+        self._memory = MemoryAgent()
         self._ocr = OCRAgent()
         self._portfolio = PortfolioAgent()
 
@@ -207,7 +209,7 @@ class Orchestrator:
         market_condition: Optional[str] = None,
         risk_free_rate: Optional[float] = None,
     ) -> Dict[str, Any]:
-        """DataAgent → DCFAgent (parallel with data) → LLMAgent."""
+        """DataAgent → load learned params → DCFAgent → LLMAgent → MemoryAgent."""
 
         # Step A: Fetch data
         data_result = await self._data.run({
@@ -218,13 +220,19 @@ class Orchestrator:
         data_result.raise_if_failed()
         stock_data = data_result.data
 
-        # Step B: DCF can run in parallel with LLM inputs being prepared — but
-        #         LLM benefits from DCF output, so we run DCF first, then LLM.
-        dcf_result = await self._dcf.run(stock_data)
-        # DCF failures are non-fatal
+        sector = stock_data.get("industry", "Indian Equity")
+        cond = stock_data.get("market_condition", "Neutral")
+
+        # Step B: Load learned parameters for this sector + condition
+        learned_params = await MemoryAgent.load_parameters(sector, cond)
+        bias_correction = learned_params.get("bias_correction", 0.0)
+        growth_adj = learned_params.get("base_growth_adj", 0.0)
+
+        # Step C: DCF with learned growth adjustments
+        dcf_result = await self._dcf.run({**stock_data, "param_overrides": learned_params})
         dcf_data = dcf_result.data if dcf_result.success else {"available": False}
 
-        # Step C: LLM analysis (enriched with DCF)
+        # Step D: LLM analysis (enriched with DCF)
         llm_result = await self._llm.run({
             "stock_data": stock_data,
             "dcf_result": dcf_data,
@@ -238,15 +246,76 @@ class Orchestrator:
             "error": llm_result.error,
         }
 
+        # Step E: Apply bias correction to probability-weighted value
+        pwv = analysis.get("probability_weighted_value")
+        if pwv and bias_correction != 0.0:
+            corrected_pwv = round(pwv * (1 + bias_correction / 100), 2)
+            analysis["probability_weighted_value"] = corrected_pwv
+            analysis["_bias_correction_applied"] = bias_correction
+            analysis["_uncorrected_pwv"] = pwv
+            current = stock_data.get("current_price") or 0
+            if current > 0:
+                analysis["upside_percentage"] = round(
+                    (corrected_pwv - current) / current * 100, 2
+                )
+
+        # Step F: Save prediction to memory (fire-and-forget, non-blocking)
+        asyncio.create_task(self._save_prediction(
+            stock_data=stock_data,
+            analysis=analysis,
+            dcf_data=dcf_data,
+            bias_correction_applied=bias_correction,
+            growth_adj_applied=growth_adj,
+        ))
+
         return {
             "stock_data": stock_data,
             "dcf_result": dcf_data,
             "analysis": analysis,
-            "market_condition_used": stock_data.get("market_condition", "Neutral"),
+            "market_condition_used": cond,
             "risk_free_rate_used": stock_data.get("risk_free_rate", 7.2),
+            "learning_applied": {
+                "bias_correction_pct": bias_correction,
+                "growth_adj_pct": growth_adj,
+                "sample_size": learned_params.get("sample_size", 0),
+            },
             "pipeline_durations_ms": {
                 "data_agent": data_result.duration_ms,
                 "dcf_agent": dcf_result.duration_ms,
                 "llm_agent": llm_result.duration_ms,
             },
         }
+
+    async def _save_prediction(
+        self,
+        stock_data: Dict,
+        analysis: Dict,
+        dcf_data: Dict,
+        bias_correction_applied: float = 0.0,
+        growth_adj_applied: float = 0.0,
+    ) -> None:
+        """Persist the valuation to PostgreSQL via MemoryAgent (non-blocking)."""
+        try:
+            await self._memory.run({
+                "mode": "save",
+                "ticker": stock_data.get("ticker"),
+                "company_name": stock_data.get("company_name"),
+                "sector": stock_data.get("industry", "Indian Equity"),
+                "market_condition": stock_data.get("market_condition", "Neutral"),
+                "risk_free_rate": stock_data.get("risk_free_rate", 7.2),
+                "price_at_prediction": stock_data.get("current_price"),
+                "predicted_value": analysis.get("probability_weighted_value"),
+                "price_target": analysis.get("price_target"),
+                "recommendation": analysis.get("recommendation"),
+                "confidence": analysis.get("confidence_level"),
+                "bull_case": analysis.get("bull_case", {}),
+                "base_case": analysis.get("base_case", {}),
+                "bear_case": analysis.get("bear_case", {}),
+                "dcf_intrinsic": dcf_data.get("probability_weighted_intrinsic"),
+                "wacc_pct": dcf_data.get("wacc_pct"),
+                "dcf_margin_of_safety": dcf_data.get("margin_of_safety_pct"),
+                "bias_correction_applied": bias_correction_applied,
+                "growth_adj_applied": growth_adj_applied,
+            })
+        except Exception as exc:
+            logger.warning("MemoryAgent save failed (non-fatal): %s", exc)

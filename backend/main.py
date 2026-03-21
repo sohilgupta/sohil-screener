@@ -1,6 +1,6 @@
 """
-AI Stock Valuation Engine — FastAPI application
-Multi-agent architecture: DataAgent → DCFAgent → LLMAgent → PortfolioAgent
+AI Stock Valuation Engine v4 — FastAPI application
+Multi-agent + self-improving learning loop
 """
 import logging
 import os
@@ -12,8 +12,14 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+import db
 from agents.orchestrator import Orchestrator
+from agents.evaluation_agent import EvaluationAgent
+from agents.learning_agent import LearningAgent
+from agents.market_tracking_agent import MarketTrackingAgent
+from agents.memory_agent import MemoryAgent
 from cache import CacheClient
+import scheduler as sched
 
 load_dotenv()
 
@@ -23,9 +29,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# App state (cache + orchestrator are singletons created at startup)
-# ---------------------------------------------------------------------------
 _cache: Optional[CacheClient] = None
 _orchestrator: Optional[Orchestrator] = None
 
@@ -33,23 +36,41 @@ _orchestrator: Optional[Orchestrator] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _cache, _orchestrator
+
+    # Cache
     _cache = await CacheClient.from_env()
+
+    # PostgreSQL + migrations
+    db_ok = await db.init_pool()
+    if db_ok:
+        await db.run_migrations()
+
+    # Orchestrator
     _orchestrator = Orchestrator(cache=_cache)
-    logger.info("Orchestrator ready — cache backend: %s", _cache.backend_name)
+
+    # Scheduler (cron jobs)
+    await sched.start_scheduler()
+
+    logger.info(
+        "v4 ready — cache=%s db=%s scheduler=%s",
+        _cache.backend_name,
+        "connected" if db_ok else "disabled",
+        "running" if sched.get_scheduler() else "disabled",
+    )
     yield
-    logger.info("Shutting down…")
+
+    await sched.stop_scheduler()
+    await db.close_pool()
+    logger.info("Shutdown complete")
 
 
 app = FastAPI(
     title="AI Stock Valuation API",
-    version="3.0.0",
-    description="Multi-agent valuation engine: Data → DCF → Gemini LLM → Portfolio",
+    version="4.0.0",
+    description="Multi-agent + self-improving learning loop",
     lifespan=lifespan,
 )
 
-# ---------------------------------------------------------------------------
-# CORS
-# ---------------------------------------------------------------------------
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
@@ -65,44 +86,40 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 class StockAnalysisRequest(BaseModel):
     ticker: str = Field(..., description="NSE/BSE ticker symbol")
-    allocation: Optional[float] = Field(None, description="Portfolio allocation %")
-    horizon: Optional[int] = Field(None, description="Investment horizon in years")
-    market_condition: Optional[str] = Field(None, description="Bullish / Bearish / Neutral")
-    risk_free_rate: Optional[float] = Field(None, description="Risk-free rate %")
+    allocation: Optional[float] = None
+    horizon: Optional[int] = None
+    market_condition: Optional[str] = None
+    risk_free_rate: Optional[float] = None
 
 
 class MultipleStocksRequest(BaseModel):
-    tickers: List[str] = Field(..., description="List of NSE/BSE tickers")
+    tickers: List[str]
     market_condition: Optional[str] = None
 
 
-# ---------------------------------------------------------------------------
-# Utility
-# ---------------------------------------------------------------------------
 def _orch() -> Orchestrator:
     if _orchestrator is None:
-        raise HTTPException(status_code=503, detail="Service not ready yet. Retry in a moment.")
+        raise HTTPException(status_code=503, detail="Service not ready. Retry in a moment.")
     return _orchestrator
 
 
 # ---------------------------------------------------------------------------
-# Endpoints
+# Core valuation endpoints (unchanged interface)
 # ---------------------------------------------------------------------------
 
 @app.get("/health")
 async def health():
     return {
         "status": "ok",
-        "version": "3.0.0",
+        "version": "4.0.0",
         "cache_backend": _cache.backend_name if _cache else "not_ready",
+        "db": "connected" if db.is_available() else "disabled",
+        "scheduler": "running" if sched.get_scheduler() else "disabled",
     }
 
 
-# ── Single Stock ─────────────────────────────────────────────────────────────
-
 @app.post("/analyze-stock")
 async def analyze_stock(req: StockAnalysisRequest):
-    """Full agent pipeline for one stock: Data → DCF → LLM analysis."""
     ticker = req.ticker.strip().upper().replace(" ", "")
     if not ticker:
         raise HTTPException(status_code=400, detail="Ticker is required")
@@ -120,42 +137,28 @@ async def analyze_stock(req: StockAnalysisRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-# ── Multiple Stocks ──────────────────────────────────────────────────────────
-
 @app.post("/analyze-multiple")
-@app.post("/analyze-multiple-stocks")  # backward-compat alias
+@app.post("/analyze-multiple-stocks")
 async def analyze_multiple_stocks(req: MultipleStocksRequest):
-    """Concurrent agent pipeline for ≤ 12 tickers."""
-    tickers = [t.strip().upper() for t in req.tickers if t.strip()]
+    tickers = [t.strip().upper().replace(" ", "") for t in req.tickers if t.strip()]
     if not tickers:
         raise HTTPException(status_code=400, detail="At least one ticker is required")
     tickers = tickers[:12]
-
     try:
-        rows = await _orch().run_multiple_stocks(
-            tickers=tickers,
-            market_condition=req.market_condition,
-        )
+        rows = await _orch().run_multiple_stocks(tickers=tickers, market_condition=req.market_condition)
         return {"success": True, "data": rows}
     except Exception as exc:
         logger.error("/analyze-multiple error: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-# ── Portfolio Upload ─────────────────────────────────────────────────────────
-
 @app.post("/upload-portfolio")
-@app.post("/upload-portfolio-screenshot")  # backward-compat alias
+@app.post("/upload-portfolio-screenshot")
 async def upload_portfolio(file: UploadFile = File(...)):
-    """OCR screenshot → per-holding valuation → portfolio analytics."""
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image (PNG/JPG/WEBP)")
     try:
         image_bytes = await file.read()
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Could not read uploaded file: {exc}")
-
-    try:
         result = await _orch().run_portfolio(image_bytes=image_bytes)
         return result
     except Exception as exc:
@@ -163,17 +166,143 @@ async def upload_portfolio(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-# ── Cache management ─────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Learning loop endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/predictions/{ticker}")
+async def get_predictions(ticker: str, limit: int = 20):
+    """Retrieve prediction history for a ticker."""
+    agent = MemoryAgent()
+    result = await agent.run({"mode": "history", "ticker": ticker.upper(), "limit": limit})
+    if not result.success:
+        raise HTTPException(status_code=500, detail=result.error)
+    return {"success": True, **result.data}
+
+
+@app.get("/learning/parameters")
+async def get_learning_parameters():
+    """View all learned model parameters."""
+    if not db.is_available():
+        return {"success": True, "parameters": [], "db": "disabled"}
+    pool = db.get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT sector, market_condition, bias_correction,
+                   bull_growth_adj, base_growth_adj, bear_growth_adj,
+                   confidence_scaling, sample_size,
+                   avg_signed_error, avg_abs_error, median_abs_error,
+                   last_updated, update_notes
+            FROM model_parameters
+            WHERE sample_size > 0
+            ORDER BY sector, market_condition
+            """
+        )
+    params = []
+    for r in rows:
+        p = dict(r)
+        if p.get("last_updated"):
+            p["last_updated"] = p["last_updated"].isoformat()
+        params.append(p)
+    return {"success": True, "parameters": params, "count": len(params)}
+
+
+@app.get("/learning/accuracy")
+async def get_accuracy_report():
+    """View accuracy metrics across all evaluated predictions."""
+    if not db.is_available():
+        return {"success": True, "report": {}, "db": "disabled"}
+    pool = db.get_pool()
+    async with pool.acquire() as conn:
+        overall = await conn.fetchrow(
+            """
+            SELECT
+                COUNT(*) AS total_predictions,
+                COUNT(*) FILTER (WHERE evaluated) AS evaluated,
+                AVG(error_pct_30d) AS avg_signed_error,
+                AVG(abs_error_pct_30d) AS avg_abs_error,
+                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY abs_error_pct_30d) AS median_abs_error,
+                COUNT(*) FILTER (WHERE abs_error_pct_30d <= 10) AS within_10pct,
+                COUNT(*) FILTER (WHERE abs_error_pct_30d <= 20) AS within_20pct
+            FROM predictions
+            WHERE evaluated = TRUE
+            """
+        )
+        by_sector = await conn.fetch(
+            """
+            SELECT sector,
+                   COUNT(*) AS count,
+                   AVG(error_pct_30d) AS avg_signed,
+                   AVG(abs_error_pct_30d) AS avg_abs
+            FROM predictions
+            WHERE evaluated = TRUE
+            GROUP BY sector ORDER BY count DESC
+            """
+        )
+        recent_runs = await conn.fetch(
+            """
+            SELECT run_type, run_at, predictions_evaluated,
+                   avg_signed_error, avg_abs_error, median_abs_error
+            FROM evaluation_runs
+            ORDER BY run_at DESC LIMIT 10
+            """
+        )
+
+    def fmt(r):
+        d = dict(r)
+        for k, v in d.items():
+            if hasattr(v, "isoformat"):
+                d[k] = v.isoformat()
+            elif isinstance(v, float):
+                d[k] = round(v, 4)
+        return d
+
+    return {
+        "success": True,
+        "overall": fmt(overall) if overall else {},
+        "by_sector": [fmt(r) for r in by_sector],
+        "recent_runs": [fmt(r) for r in recent_runs],
+    }
+
+
+@app.post("/learning/evaluate")
+async def trigger_evaluate(dry_run: bool = False):
+    """Manually trigger the EvaluationAgent."""
+    agent = EvaluationAgent()
+    result = await agent.run({"min_days_old": 30, "dry_run": dry_run})
+    if not result.success:
+        raise HTTPException(status_code=500, detail=result.error)
+    return {"success": True, **result.data}
+
+
+@app.post("/learning/run")
+async def trigger_learning(dry_run: bool = False, min_samples: int = 3):
+    """Manually trigger the LearningAgent to update model parameters."""
+    agent = LearningAgent()
+    result = await agent.run({"dry_run": dry_run, "min_samples": min_samples, "alpha": 0.3})
+    if not result.success:
+        raise HTTPException(status_code=500, detail=result.error)
+    return {"success": True, **result.data}
+
+
+@app.post("/learning/track")
+async def trigger_tracking(dry_run: bool = False):
+    """Manually trigger the MarketTrackingAgent to fetch latest prices."""
+    agent = MarketTrackingAgent()
+    result = await agent.run({"dry_run": dry_run})
+    if not result.success:
+        raise HTTPException(status_code=500, detail=result.error)
+    return {"success": True, **result.data}
+
 
 @app.delete("/cache")
 async def flush_cache():
-    """Flush all cached data (admin use only)."""
     if _cache:
         await _cache.flush()
     return {"flushed": True}
 
 
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
