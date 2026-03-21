@@ -77,6 +77,9 @@ class LLMAgent(BaseAgent):
             market_cap=sd.get("market_cap"),
             roe=sd.get("roe"),
             opm=sd.get("opm"),
+            market=sd.get("market", "IN"),
+            currency=sd.get("currency", "INR"),
+            unit_label=sd.get("unit_label", "Crore"),
         )
 
         # Append DCF context if available
