@@ -44,14 +44,14 @@ export default function InputForm({ onSubmit, loading = false }) {
         {/* Ticker input */}
         <div>
           <label className="text-subhead font-medium text-apple-text dark:text-apple-dark-text block mb-1.5">
-            Ticker <span className="text-apple-red">*</span>
+            NSE / BSE Symbol <span className="text-apple-red">*</span>
           </label>
           <div className="relative">
             <input
               type="text"
               value={ticker}
-              onChange={(e) => setTicker(e.target.value.toUpperCase())}
-              placeholder="e.g. HDFCBANK, RELIANCE, TCS"
+              onChange={(e) => setTicker(e.target.value.toUpperCase().replace(/\s+/g, ''))}
+              placeholder="e.g. HDFCBANK · TCS · OLAELEC · ZOMATO"
               className="apple-input pr-10 font-mono uppercase tracking-wider"
               required
               disabled={loading}
@@ -68,6 +68,10 @@ export default function InputForm({ onSubmit, loading = false }) {
               </button>
             )}
           </div>
+          <p className="mt-1.5 ml-1 text-caption text-apple-secondary-text dark:text-apple-dark-secondary">
+            Use the <span className="font-semibold">NSE/BSE symbol</span>, not the company name.
+            {' '}Examples: <span className="font-mono">HDFCBANK</span>, <span className="font-mono">OLAELEC</span>, <span className="font-mono">RELIANCE</span>
+          </p>
         </div>
 
         {/* Advanced Options Toggle */}

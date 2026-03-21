@@ -103,7 +103,7 @@ async def health():
 @app.post("/analyze-stock")
 async def analyze_stock(req: StockAnalysisRequest):
     """Full agent pipeline for one stock: Data → DCF → LLM analysis."""
-    ticker = req.ticker.strip().upper()
+    ticker = req.ticker.strip().upper().replace(" ", "")
     if not ticker:
         raise HTTPException(status_code=400, detail="Ticker is required")
     try:

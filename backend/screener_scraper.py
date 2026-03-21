@@ -75,10 +75,13 @@ def _parse_page(soup: BeautifulSoup, ticker: str) -> Dict[str, Any]:
     """Parse a screener.in company page into a structured dict."""
 
     # --- Company name ---
+    # Older pages use class="company-name"; newer listings use class="h2 shrink-text"
     company_name = ticker
-    h1 = soup.find("h1", class_="company-name")
+    h1 = soup.find("h1", class_="company-name") or soup.find("h1")
     if h1:
-        company_name = h1.get_text(strip=True)
+        name = h1.get_text(strip=True)
+        if name and len(name) < 120:
+            company_name = name
 
     # --- Top ratios (key metrics list) ---
     ratios: Dict[str, str] = {}
@@ -93,15 +96,38 @@ def _parse_page(soup: BeautifulSoup, ticker: str) -> Dict[str, Any]:
                 ratios[key] = val
 
     current_price = None
-    for k in ["current price", "price"]:
+    for k in ["current price", "price", "ltp", "cmp"]:
         if k in ratios:
             current_price = clean_number(ratios[k])
-            break
+            if current_price:
+                break
 
     market_cap = clean_number(ratios.get("mar cap", ratios.get("market cap", "")))
     pe_ratio = clean_number(ratios.get("stock p/e", ratios.get("p/e", "")))
     book_value = clean_number(ratios.get("book value", ""))
     roe = clean_number(ratios.get("roe", ""))
+
+    # --- Fallback price/market-cap for new listings (no #top-ratios section) ---
+    # span.number elements: price has parent text "₹X" (no Cr, no /, no %)
+    if current_price is None:
+        for span in soup.find_all("span", class_="number"):
+            parent_text = span.parent.get_text(strip=True) if span.parent else ""
+            num_text = span.get_text(strip=True)
+            if (parent_text.startswith("₹") and
+                    "Cr" not in parent_text and
+                    "/" not in parent_text and
+                    "%" not in parent_text):
+                val = clean_number(num_text)
+                if val and 0.5 < val < 200_000:
+                    current_price = val
+                    break
+
+    if market_cap is None:
+        for span in soup.find_all("span", class_="number"):
+            parent_text = span.parent.get_text(strip=True) if span.parent else ""
+            if parent_text.startswith("₹") and "Cr" in parent_text:
+                market_cap = clean_number(span.get_text(strip=True))
+                break
 
     # --- P&L ---
     revenue = ebitda = net_income = opm = None
@@ -113,14 +139,16 @@ def _parse_page(soup: BeautifulSoup, ticker: str) -> Dict[str, Any]:
                 continue
             rn = cells[0].get_text(strip=True).lower()
             val_text = _get_last_col(cells)
-            if any(k in rn for k in ["sales +", "net sales", "total revenue", "revenue from"]):
+            # Revenue: "Sales+" (no space), "Sales +", "Net Sales", "Revenue from …", "Total Income"
+            if not revenue and any(k in rn for k in ["sales+", "sales +", "net sales", "total revenue", "revenue from", "total income"]):
                 revenue = clean_number(val_text)
             elif "operating profit" in rn and "%" not in rn:
                 ebitda = clean_number(val_text)
-            elif "opm %" in rn or "opm%" in rn:
+            elif "opm %" in rn or "opm%" in rn or "opm" == rn.strip():
                 opm = clean_number(val_text)
-            elif "net profit" in rn and "%" not in rn:
-                net_income = clean_number(val_text)
+            elif ("net profit" in rn or "profit after tax" in rn or "profit before tax" in rn) and "%" not in rn:
+                if not net_income:
+                    net_income = clean_number(val_text)
 
     # --- Balance Sheet ---
     total_debt = de_ratio = None
