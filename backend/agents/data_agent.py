@@ -70,24 +70,38 @@ class DataAgent(BaseAgent):
             None, fetch_yf_data, yf_symbol, meta
         )
 
-        # ── Step 4: Fallback to screener.in for Indian stocks ──────────────────
-        if not self._has_price(stock_data) and meta.get("market") == "IN":
-            logger.warning(
-                "yfinance returned no price for %s — trying screener.in", yf_symbol
-            )
+        # ── Step 4: Supplement with screener.in for Indian stocks ──────────────
+        # Even when yfinance has the price, screener.in often has better
+        # financial data (revenue, EBITDA, FCF) for Indian mid/small-caps.
+        if meta.get("market") == "IN":
             from screener_scraper import fetch_screener_data
-            screener_data = await loop.run_in_executor(
-                None, fetch_screener_data, display_ticker
-            )
-            if self._has_price(screener_data):
-                # Screener data lacks unit_multiplier; inject defaults
-                screener_data.setdefault("unit_multiplier", 1e7)
-                screener_data.setdefault("unit_label", "Crore")
-                screener_data.setdefault("market", "IN")
-                screener_data.setdefault("currency", "INR")
-                stock_data = screener_data
-            elif stock_data is None:
-                stock_data = screener_data  # at least has company name
+            try:
+                screener_data = await loop.run_in_executor(
+                    None, fetch_screener_data, display_ticker
+                )
+                if stock_data is None:
+                    # yfinance completely failed — use screener.in as primary
+                    if self._has_price(screener_data):
+                        screener_data.setdefault("unit_multiplier", 1e7)
+                        screener_data.setdefault("unit_label", "Crore")
+                        screener_data.setdefault("market", "IN")
+                        screener_data.setdefault("currency", "INR")
+                        stock_data = screener_data
+                else:
+                    # yfinance has price but may lack financials — fill gaps
+                    for field in ["revenue", "ebitda", "net_income", "fcf",
+                                  "de_ratio", "pe_ratio", "roe", "opm",
+                                  "book_value", "competitors"]:
+                        if stock_data.get(field) is None and screener_data.get(field) is not None:
+                            stock_data[field] = screener_data[field]
+                    # Prefer screener.in company name if yfinance gave a generic one
+                    if (screener_data.get("company_name") and
+                            screener_data["company_name"] != display_ticker and
+                            stock_data.get("company_name") == display_ticker):
+                        stock_data["company_name"] = screener_data["company_name"]
+                    stock_data["source"] = "yahoo_finance+screener.in"
+            except Exception as e:
+                logger.warning("screener.in supplement failed for %s: %s", display_ticker, e)
 
         # ── Step 5: Last-resort empty dict ─────────────────────────────────────
         if stock_data is None:
