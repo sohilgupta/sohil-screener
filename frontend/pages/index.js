@@ -12,6 +12,7 @@ import Charts from '../components/Charts';
 import InputForm from '../components/InputForm';
 import PortfolioUpload from '../components/PortfolioUpload';
 import LoadingSkeleton from '../components/LoadingSkeleton';
+import DCFPanel from '../components/DCFPanel';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -177,7 +178,7 @@ function TabBar({ active, onChange }) {
 
 // ─── Single Stock Result ──────────────────────────────────────────────────────
 function SingleStockResult({ data }) {
-  const { stock_data: sd, analysis: an } = data;
+  const { stock_data: sd, analysis: an, dcf_result: dcf } = data;
   const [showFull, setShowFull] = useState(false);
 
   const upside = an.upside_percentage;
@@ -278,6 +279,9 @@ function SingleStockResult({ data }) {
         bearTarget={an.bear_case?.target_price}
         pwv={an.probability_weighted_value}
       />
+
+      {/* DCF Valuation Panel */}
+      {dcf && <DCFPanel dcf={dcf} />}
 
       {/* Financial Snapshot */}
       <GlassCard className="p-6">
@@ -387,16 +391,20 @@ function MultipleStocksResult({ rows }) {
 
 // ─── Portfolio Result ─────────────────────────────────────────────────────────
 function PortfolioResult({ data }) {
-  const { holdings, analysis } = data;
-  const total_invested = analysis.reduce((s, r) => s + (r.total_invested_value || 0), 0);
-  const total_current = analysis.reduce((s, r) => s + (r.total_current_value || 0), 0);
+  const { holdings, analysis, portfolio = {} } = data;
+  const summary = portfolio.summary || {};
+  const rebalance = portfolio.rebalance || [];
+  const allocation = portfolio.allocation || {};
+
+  const total_invested = summary.total_invested || analysis.reduce((s, r) => s + (r.total_invested_value || 0), 0);
+  const total_current = summary.total_current_value || analysis.reduce((s, r) => s + (r.total_current_value || 0), 0);
   const total_pnl = total_current - total_invested;
   const total_pnl_pct = total_invested > 0 ? (total_pnl / total_invested) * 100 : 0;
 
   return (
     <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
       {/* Portfolio summary */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <MetricDisplay label="Total Invested" value={fmt(total_invested)} />
         <MetricDisplay label="Current Value" value={fmt(total_current)} highlight />
         <MetricDisplay
@@ -405,7 +413,54 @@ function PortfolioResult({ data }) {
           secondary={fmtPct(total_pnl_pct)}
           color={total_pnl >= 0 ? 'text-apple-green' : 'text-apple-red'}
         />
+        {summary.total_upside_pct != null && (
+          <MetricDisplay
+            label="Portfolio Upside"
+            value={fmtPct(summary.total_upside_pct)}
+            secondary={summary.diversification || ''}
+            color={summary.total_upside_pct >= 0 ? 'text-apple-green' : 'text-apple-red'}
+          />
+        )}
       </div>
+
+      {/* Rebalancing suggestions */}
+      {rebalance.length > 0 && (
+        <GlassCard className="p-6">
+          <SectionTitle title="Rebalancing Suggestions" subtitle="Agent-generated action plan" />
+          <div className="mt-4 space-y-3">
+            {rebalance.map((r, i) => {
+              const actionColor =
+                r.action === 'Add' ? 'text-apple-green border-apple-green/30 bg-apple-green/5' :
+                r.action === 'Exit' ? 'text-apple-red border-apple-red/30 bg-apple-red/5' :
+                'text-apple-orange border-apple-orange/30 bg-apple-orange/5';
+              return (
+                <div key={i} className={`flex items-center justify-between p-3 rounded-apple border ${actionColor}`}>
+                  <div>
+                    <p className="font-semibold text-sm">{r.company_name || r.ticker}</p>
+                    <p className="text-footnote opacity-70 mt-0.5">{r.rationale}</p>
+                  </div>
+                  <span className="ml-4 font-bold text-sm flex-shrink-0">{r.action}</span>
+                </div>
+              );
+            })}
+          </div>
+        </GlassCard>
+      )}
+
+      {/* Sector allocation */}
+      {Object.keys(allocation).length > 0 && (
+        <GlassCard className="p-6">
+          <SectionTitle title="Sector Allocation" />
+          <div className="mt-4 flex flex-wrap gap-2">
+            {Object.entries(allocation).map(([sector, pct]) => (
+              <div key={sector} className="flex items-center gap-2 px-3 py-1.5 bg-apple-secondary-bg dark:bg-apple-dark-elevated rounded-full">
+                <span className="text-footnote font-medium text-apple-text dark:text-apple-dark-text">{sector}</span>
+                <span className="text-footnote text-apple-blue font-semibold">{pct}%</span>
+              </div>
+            ))}
+          </div>
+        </GlassCard>
+      )}
 
       {/* Extracted Holdings */}
       {holdings.length > 0 && (
@@ -534,7 +589,7 @@ export default function HomePage() {
     setMultipleResult(null);
     try {
       const tickerList = tickers.split(',').map((t) => t.trim()).filter(Boolean);
-      const { data } = await axios.post(`${API}/analyze-multiple-stocks`, {
+      const { data } = await axios.post(`${API}/analyze-multiple`, {
         tickers: tickerList,
       });
       setMultipleResult(data.data);
@@ -553,7 +608,7 @@ export default function HomePage() {
     try {
       const form = new FormData();
       form.append('file', file);
-      const { data } = await axios.post(`${API}/upload-portfolio-screenshot`, form, {
+      const { data } = await axios.post(`${API}/upload-portfolio`, form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setPortfolioResult(data);
@@ -633,7 +688,7 @@ export default function HomePage() {
         {/* Footer */}
         <footer className="border-t border-apple-separator/30 dark:border-apple-dark-separator/30 py-8 px-6 text-center">
           <p className="text-footnote text-apple-secondary-text dark:text-apple-dark-secondary">
-            Data sourced from screener.in · Analysis by Google Gemini · Not financial advice
+            Multi-agent system: Data · DCF · LLM · Portfolio agents · Data from screener.in · Not financial advice
           </p>
         </footer>
       </div>

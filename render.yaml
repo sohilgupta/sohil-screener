@@ -19,4 +19,6 @@ services:
         value: "1"
       - key: PYTHONDONTWRITEBYTECODE
         value: "1"
+      - key: REDIS_URL
+        sync: false          # set manually in Render dashboard — never committed
     autoDeploy: true
