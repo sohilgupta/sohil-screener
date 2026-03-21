@@ -110,28 +110,22 @@ class DataAgent(BaseAgent):
     def _has_price(data: Optional[Dict]) -> bool:
         return bool(data and data.get("current_price"))
 
+    @staticmethod
     def _inject_market_context(
-        self, stock_data: Dict[str, Any], inputs: Dict[str, Any]
+        stock_data: Dict[str, Any], inputs: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Add market_condition and risk_free_rate, auto-detecting if not supplied."""
-        import asyncio
-        loop = asyncio.get_event_loop()
-
+        """Add market_condition and risk_free_rate (non-blocking defaults)."""
         # Market condition
         mc = inputs.get("market_condition") or stock_data.get("market_condition")
         if not mc:
-            try:
-                from screener_scraper import get_nifty_trend
-                mc = get_nifty_trend()
-            except Exception:
-                mc = "Neutral"
+            mc = "Neutral"  # safe default; market tracking agent refines this
         stock_data["market_condition"] = mc
 
-        # Risk-free rate
+        # Risk-free rate — yfinance_fetcher already sets a default, respect it
         rfr = inputs.get("risk_free_rate") or stock_data.get("risk_free_rate")
         if not rfr:
             rfr = 4.5 if stock_data.get("market") == "US" else 7.2
-        stock_data["risk_free_rate"] = rfr
+        stock_data["risk_free_rate"] = float(rfr)
 
         return stock_data
 

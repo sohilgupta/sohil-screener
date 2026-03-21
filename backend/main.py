@@ -303,6 +303,28 @@ async def flush_cache():
     return {"flushed": True}
 
 
+@app.get("/debug/{ticker}")
+async def debug_ticker(ticker: str):
+    """Diagnostic endpoint — resolve ticker and show raw yfinance data."""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    try:
+        from ticker_resolver import resolve_ticker
+        meta = await loop.run_in_executor(None, resolve_ticker, ticker.strip())
+
+        from yfinance_fetcher import fetch_yf_data
+        data = await loop.run_in_executor(None, fetch_yf_data, meta["yf_symbol"], meta)
+
+        return {
+            "input": ticker,
+            "resolved": meta,
+            "yf_data": data,
+            "has_price": bool(data and data.get("current_price")),
+        }
+    except Exception as exc:
+        return {"input": ticker, "error": str(exc)}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
