@@ -15,7 +15,7 @@ import LoadingSkeleton from '../components/LoadingSkeleton';
 import DCFPanel from '../components/DCFPanel';
 import LearningPanel from '../components/LearningPanel';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:10000';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 const fmt = (n, prefix = '₹') =>
